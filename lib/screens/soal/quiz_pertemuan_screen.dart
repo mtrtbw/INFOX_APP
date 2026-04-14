@@ -2,16 +2,16 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
-import 'soal_harian_screen.dart';
+import 'quiz_cepat_screen.dart';
 
-class SoalHarianPertemuanScreen extends StatefulWidget {
+class QuizPertemuanScreen extends StatefulWidget {
   final String idMateri;
   final String nis;
   final String nama;
   final String kelas;
   final String noAbsen;
 
-  const SoalHarianPertemuanScreen({
+  const QuizPertemuanScreen({
     super.key,
     required this.idMateri,
     required this.nis,
@@ -21,16 +21,15 @@ class SoalHarianPertemuanScreen extends StatefulWidget {
   });
 
   @override
-  State<SoalHarianPertemuanScreen> createState() =>
-      _SoalHarianPertemuanScreenState();
+  State<QuizPertemuanScreen> createState() => _QuizPertemuanScreenState();
 }
 
-class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
+class _QuizPertemuanScreenState extends State<QuizPertemuanScreen>
     with SingleTickerProviderStateMixin {
-  static const _baseUrl       = 'http://192.168.100.82/infox-backend/api';
-  static const _gradientGreen = [Color(0xFF2E7D52), Color(0xFF43A047)];
-  static const _bgColor       = Color(0xFFF0F4FF);
-  static const _dark          = Color(0xFF1A1A2E);
+  static const _baseUrl      = 'http://192.168.100.82/infox-backend/api';
+  static const _gradientBlue = [Color(0xFF3D5AFE), Color(0xFF7C4DFF)];
+  static const _bgColor      = Color(0xFFF0F4FF);
+  static const _dark         = Color(0xFF1A1A2E);
 
   late AnimationController _fadeController;
   late Animation<double>   _fadeAnim;
@@ -40,12 +39,12 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
   String? _error;
 
   final _cardColors = const [
-    [Color(0xFF1565C0), Color(0xFF1E88E5)],
-    [Color(0xFF2E7D52), Color(0xFF43A047)],
+    [Color(0xFF3D5AFE), Color(0xFF7C4DFF)],
     [Color(0xFF6A1B9A), Color(0xFF8E24AA)],
-    [Color(0xFF00695C), Color(0xFF00897B)],
-    [Color(0xFF558B2F), Color(0xFF7CB342)],
     [Color(0xFF283593), Color(0xFF3949AB)],
+    [Color(0xFF1565C0), Color(0xFF1E88E5)],
+    [Color(0xFF4527A0), Color(0xFF5E35B1)],
+    [Color(0xFF0277BD), Color(0xFF0288D1)],
   ];
 
   @override
@@ -69,11 +68,11 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
     setState(() { _isLoading = true; _error = null; });
     try {
       // ✅ FIX: tidak pakai ?id_materi — pertemuan bersifat global
-      final url = '$_baseUrl/get_pertemuan.php';
-      print('[Pertemuan Harian] GET $url');
+      final url = '$_baseUrl/get_pertemuan_quiz.php';
+      print('[Pertemuan Quiz] GET $url');
       final res = await http.get(Uri.parse(url))
           .timeout(const Duration(seconds: 10));
-      print('[Pertemuan Harian] ${res.statusCode} — ${res.body}');
+      print('[Pertemuan Quiz] ${res.statusCode} — ${res.body}');
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
@@ -97,7 +96,7 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
         });
       }
     } catch (e) {
-      print('[Pertemuan Harian] Error: $e');
+      print('[Pertemuan Quiz] Error: $e');
       setState(() { _error = 'Tidak dapat terhubung ke server'; _isLoading = false; });
     }
   }
@@ -115,10 +114,10 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
     }
 
     final idPertemuan = pertemuan['id_pertemuan']?.toString() ?? '';
-    print('[Pertemuan Harian] Dipilih: $idPertemuan — ${pertemuan['judul']}');
+    print('[Pertemuan Quiz] Dipilih: $idPertemuan — ${pertemuan['judul']}');
 
     Navigator.push(context, PageRouteBuilder(
-      pageBuilder: (_, anim, __) => SoalHarianScreen(
+      pageBuilder: (_, anim, __) => QuizCepatScreen(
         idMateri:    widget.idMateri,
         idPertemuan: idPertemuan,   // ✅ diteruskan dengan benar
         nis:         widget.nis,
@@ -182,7 +181,7 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
                 child: Row(children: [
                   Container(width: 44, height: 44,
                     decoration: BoxDecoration(borderRadius: BorderRadius.circular(12),
-                        gradient: const LinearGradient(colors: _gradientGreen)),
+                        gradient: const LinearGradient(colors: _gradientBlue)),
                     child: const Icon(Icons.person_rounded, color: Colors.white, size: 22)),
                   const SizedBox(width: 12),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -208,14 +207,14 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
 
             // ── LIST PERTEMUAN ──
             Expanded(child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF43A047)))
+                ? const Center(child: CircularProgressIndicator(color: Color(0xFF3D5AFE)))
                 : _error != null
                     ? _buildError()
                     : _pertemuanList.isEmpty
                         ? _buildEmpty()
                         : RefreshIndicator(
                             onRefresh: _fetchPertemuan,
-                            color: const Color(0xFF43A047),
+                            color: const Color(0xFF3D5AFE),
                             child: ListView.separated(
                               padding: EdgeInsets.symmetric(horizontal: pad, vertical: 4),
                               itemCount: _pertemuanList.length,
@@ -281,21 +280,37 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
                       maxLines: 1, overflow: TextOverflow.ellipsis),
                 ],
                 const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: adaSoal
-                        ? colors[0].withOpacity(0.10)
-                        : Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(20)),
-                  child: Row(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(Icons.quiz_rounded, size: 12,
-                        color: adaSoal ? colors[0] : Colors.grey.shade400),
-                    const SizedBox(width: 4),
-                    Text(adaSoal ? '$jumlahSoal soal' : 'Belum ada soal',
-                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
-                            color: adaSoal ? colors[0] : Colors.grey.shade400)),
-                  ])),
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: adaSoal
+                          ? colors[0].withOpacity(0.10)
+                          : Colors.grey.shade100,
+                      borderRadius: BorderRadius.circular(20)),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.quiz_rounded, size: 12,
+                          color: adaSoal ? colors[0] : Colors.grey.shade400),
+                      const SizedBox(width: 4),
+                      Text(adaSoal ? '$jumlahSoal soal' : 'Belum ada soal',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600,
+                              color: adaSoal ? colors[0] : Colors.grey.shade400)),
+                    ])),
+                  if (adaSoal) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFF9800).withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(20)),
+                      child: const Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.timer_rounded, size: 12, color: Color(0xFFFF9800)),
+                        SizedBox(width: 4),
+                        Text('30 detik/soal', style: TextStyle(fontSize: 11,
+                            fontWeight: FontWeight.w600, color: Color(0xFFFF9800))),
+                      ])),
+                  ],
+                ]),
               ]))),
 
             // Arrow / lock
@@ -326,14 +341,14 @@ class _SoalHarianPertemuanScreenState extends State<SoalHarianPertemuanScreen>
         icon: const Icon(Icons.refresh_rounded),
         label: const Text('Coba Lagi'),
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF43A047),
+          backgroundColor: const Color(0xFF3D5AFE),
           foregroundColor: Colors.white,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12))),
     ])));
 
   Widget _buildEmpty() => Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-    Icon(Icons.calendar_today_rounded, size: 56, color: Colors.grey.shade300),
+    Icon(Icons.quiz_rounded, size: 56, color: Colors.grey.shade300),
     const SizedBox(height: 12),
     Text('Belum ada pertemuan', style: TextStyle(color: Colors.grey.shade500,
         fontSize: 15, fontWeight: FontWeight.w600)),
@@ -348,9 +363,9 @@ class _BlobPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     for (final s in [
-      (const Color(0xFF43A047), 0.90, 0.05, 0.42),
-      (const Color(0xFF5C6BC0), 0.05, 0.55, 0.35),
-      (const Color(0xFFFF7043), 0.70, 0.85, 0.30),
+      (const Color(0xFF5C6BC0), 0.90, 0.05, 0.42),
+      (const Color(0xFF43A047), 0.05, 0.45, 0.35),
+      (const Color(0xFFFF7043), 0.70, 0.80, 0.30),
     ]) {
       canvas.drawCircle(
         Offset(size.width * s.$2, size.height * s.$3),

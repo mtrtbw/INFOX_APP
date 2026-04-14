@@ -4,7 +4,7 @@ import '../models/materi.dart';
 
 class ApiService {
   static const String baseUrl =
-      'http://10.5.50.231/infox-backend/api';
+      'http://192.168.100.82/infox-backend/api';
 
   static Future<List<Materi>> fetchMateri() async {
     final response =

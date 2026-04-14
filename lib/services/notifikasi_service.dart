@@ -6,7 +6,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
 
 class NotifikasiService {
-  static const baseUrl = 'http://10.5.50.231/infox-backend/api';
+  static const baseUrl = 'http://192.168.100.82/infox-backend/api';
 
   static final FlutterLocalNotificationsPlugin _notifPlugin =
       FlutterLocalNotificationsPlugin();

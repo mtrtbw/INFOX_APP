@@ -7,7 +7,6 @@ import '../../services/quiz_service.dart';
 import '../../services/nilai_service.dart';
 import '../../services/ulasan_service.dart';
 
-// ── Helper: parse teks & gambar (support URL & base64) ──
 Map<String, String> parseSoal(dynamic raw) {
   if (raw == null) return {'teks': '', 'gambar': ''};
   final s = raw.toString();
@@ -23,7 +22,6 @@ Map<String, String> parseSoal(dynamic raw) {
   return {'teks': s, 'gambar': ''};
 }
 
-// ── Widget gambar: support URL dan base64 data URL ──
 Widget _buildGambar(String gambar, {double? height, Color loadingColor = Colors.white54}) {
   if (gambar.isEmpty) return const SizedBox.shrink();
   if (gambar.startsWith('data:')) {
@@ -46,6 +44,7 @@ Widget _buildGambar(String gambar, {double? height, Color loadingColor = Colors.
 
 class QuizCepatScreen extends StatefulWidget {
   final String idMateri;
+  final String idPertemuan; // ← TAMBAHAN BARU
   final String nis;
   final String nama;
   final String kelas;
@@ -54,6 +53,7 @@ class QuizCepatScreen extends StatefulWidget {
   const QuizCepatScreen({
     super.key,
     required this.idMateri,
+    required this.idPertemuan, // ← TAMBAHAN BARU
     required this.nis,
     required this.nama,
     required this.kelas,
@@ -70,13 +70,12 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
   List<Map<String, dynamic>> quizList = [];
   bool isLoading = true;
 
-  // ── Audio ──
   final AudioPlayer _bgmPlayer = AudioPlayer();
   bool _isMuted = false;
 
   int currentQuestion = 0;
   int score           = 0;
-  int timeLeft        = 25;
+  int timeLeft        = 30;
   String? selectedKey;
   bool answered       = false;
   Timer? timer;
@@ -103,7 +102,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
       await _bgmPlayer.setVolume(0.5);
       await _bgmPlayer.play(AssetSource('sounds/Subway Surfers.mp3'));
     } catch (e) {
-      print('[BGM] error: \$e');
+      print('[BGM] error: $e');
     }
   }
 
@@ -113,10 +112,19 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
   }
 
   Future<void> _loadQuiz() async {
-    final data = await QuizService.getQuiz(widget.idMateri);
+    // ← Teruskan idPertemuan ke QuizService
+    final data = await QuizService.getQuiz(
+      widget.idMateri,
+      tipe: 'QUIZ',
+      idPertemuan: widget.idPertemuan,
+    );
     if (!mounted) return;
     setState(() { quizList = data; isLoading = false; });
-    if (quizList.isNotEmpty) { _fadeController.forward(); _startTimer(); _initAudio(); }
+    if (quizList.isNotEmpty) {
+      _fadeController.forward();
+      _startTimer();
+      _initAudio();
+    }
   }
 
   void _startTimer() {
@@ -125,9 +133,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
     timer = Timer.periodic(const Duration(seconds: 1), (t) {
       if (!mounted) { t.cancel(); return; }
       if (timeLeft == 0) { t.cancel(); _finishQuiz(); }
-      else {
-        setState(() => timeLeft--);
-      }
+      else { setState(() => timeLeft--); }
     });
   }
 
@@ -157,9 +163,14 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
         ? ((score / quizList.length) * 100).toInt() : 0;
 
     await NilaiService.simpanNilai(
-      nis: widget.nis, nama: widget.nama,
-      kelas: widget.kelas, noAbsen: widget.noAbsen,
-      idMateri: widget.idMateri, skor: nilaiAkhir,
+      nis:         widget.nis,
+      nama:        widget.nama,
+      kelas:       widget.kelas,
+      noAbsen:     widget.noAbsen,
+      idMateri:    widget.idMateri,
+      idPertemuan: widget.idPertemuan, // ← TAMBAHAN BARU
+      skor:        nilaiAkhir,
+      jenisSoal:   'QUIZ',
     );
 
     if (!mounted) return;
@@ -243,17 +254,17 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
               const Text('Soal belum tersedia', style: TextStyle(fontSize: 18,
                   fontWeight: FontWeight.w800, color: _dark)),
               const SizedBox(height: 8),
-              Text('Belum ada soal quiz yang ditambahkan.',
+              Text('Belum ada soal quiz untuk pertemuan ini.',
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
               const Spacer(),
             ]))),
         ]));
     }
 
-    final soal       = quizList[currentQuestion];
-    final opsi       = soal['opsi'] as Map<String, dynamic>;
-    final soalData   = parseSoal(soal['pertanyaan']);
-    final timerRatio = timeLeft / 25;
+    final soal     = quizList[currentQuestion];
+    final opsi     = soal['opsi'] as Map<String, dynamic>;
+    final soalData = parseSoal(soal['pertanyaan']);
+    final timerRatio = timeLeft / 30;
     final timerColor = timeLeft > 15
         ? const Color(0xFF43A047)
         : timeLeft > 7 ? const Color(0xFFFF9800) : const Color(0xFFE53935);
@@ -278,21 +289,19 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                           blurRadius: 12, offset: const Offset(0, 4))]),
                     child: const Icon(Icons.close_rounded, color: _dark, size: 20))),
                 const SizedBox(width: 14),
-                Text('Quiz Cepat', style: TextStyle(fontSize: isTablet ? 22 : 19,
-                    fontWeight: FontWeight.w800, color: _dark)),
-                const Spacer(),
+                Expanded(child: Text('Quiz Cepat', style: TextStyle(
+                    fontSize: isTablet ? 22 : 19,
+                    fontWeight: FontWeight.w800, color: _dark))),
                 Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(borderRadius: BorderRadius.circular(12),
-                    gradient: const LinearGradient(colors: _gradientBlue)),
-                  child: Text('⭐ $score', style: const TextStyle(color: Colors.white,
-                      fontWeight: FontWeight.w800, fontSize: 14))),
+                      gradient: const LinearGradient(colors: _gradientBlue)),
+                  child: Text('⭐ $score', style: const TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14))),
                 const SizedBox(width: 8),
                 GestureDetector(
                   onTap: _toggleMute,
-                  child: Container(
-                    width: 40, height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white,
+                  child: Container(width: 40, height: 40,
+                    decoration: BoxDecoration(color: Colors.white,
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
                           blurRadius: 10, offset: const Offset(0, 3))]),
@@ -365,12 +374,10 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                           style: TextStyle(color: Colors.white,
                               fontSize: isTablet ? 12 : 11, fontWeight: FontWeight.w700))),
                     const SizedBox(height: 12),
-                    // Teks pertanyaan
                     Text(soalData['teks']!,
                         style: TextStyle(color: Colors.white,
                             fontSize: isTablet ? 18 : 16,
                             fontWeight: FontWeight.w700, height: 1.4)),
-                    // Gambar pertanyaan (jika ada)
                     if ((soalData['gambar'] ?? '').isNotEmpty) ...[
                       const SizedBox(height: 12),
                       ClipRRect(borderRadius: BorderRadius.circular(12),
@@ -381,11 +388,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                               : Container(height: 120, alignment: Alignment.center,
                                   child: const CircularProgressIndicator(
                                       color: Colors.white54, strokeWidth: 2)),
-                          errorBuilder: (_, __, ___) => Container(height: 80,
-                            decoration: BoxDecoration(color: Colors.white.withOpacity(0.1),
-                                borderRadius: BorderRadius.circular(12)),
-                            child: const Center(child: Icon(Icons.broken_image_outlined,
-                                color: Colors.white54))),
+                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                         )),
                     ],
                   ]),
@@ -395,9 +398,9 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
 
               // ── OPSI JAWABAN ──
               ...opsi.entries.map((entry) {
-                final key       = entry.key;
-                final opsiData  = parseSoal(entry.value);
-                final correct   = quizList[currentQuestion]['jawaban_benar'];
+                final key      = entry.key;
+                final opsiData = parseSoal(entry.value);
+                final correct  = quizList[currentQuestion]['jawaban_benar'];
                 final isCorrect = answered && key == correct;
                 final isWrong   = answered && key == selectedKey && key != correct;
 
@@ -416,7 +419,6 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                       boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
                           blurRadius: 8, offset: const Offset(0, 3))]),
                     child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      // Badge huruf
                       Container(width: 32, height: 32,
                         decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
                           gradient: !answered
@@ -435,7 +437,6 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                                     color: !answered ? Colors.white : Colors.grey.shade500,
                                     fontWeight: FontWeight.w800, fontSize: 13)))),
                       const SizedBox(width: 12),
-                      // Konten opsi
                       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         if ((opsiData['teks'] ?? '').isNotEmpty)
                           Text(opsiData['teks']!,
@@ -443,7 +444,6 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                                   fontWeight: FontWeight.w600,
                                   color: isCorrect ? const Color(0xFF2E7D52)
                                       : isWrong ? const Color(0xFFE53935) : _dark)),
-                        // Gambar opsi (jika ada)
                         if ((opsiData['gambar'] ?? '').isNotEmpty) ...[
                           const SizedBox(height: 8),
                           ClipRRect(borderRadius: BorderRadius.circular(10),
@@ -452,13 +452,8 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                               loadingBuilder: (ctx, child, progress) => progress == null
                                   ? child
                                   : const SizedBox(height: 80,
-                                      child: Center(child: CircularProgressIndicator(
-                                          strokeWidth: 2))),
-                              errorBuilder: (_, __, ___) => Container(height: 60,
-                                decoration: BoxDecoration(color: Colors.grey.shade100,
-                                    borderRadius: BorderRadius.circular(10)),
-                                child: const Center(child: Icon(Icons.broken_image_outlined,
-                                    color: Colors.grey))),
+                                      child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
+                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
                             )),
                         ],
                       ])),
@@ -541,7 +536,6 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
           child: Column(children: [
             const SizedBox(height: 40),
 
-            // HERO CARD
             Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 32 : 28),
               decoration: BoxDecoration(
@@ -563,7 +557,6 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
             const SizedBox(height: 20),
 
-            // SCORE DETAIL
             Container(padding: EdgeInsets.all(isTablet ? 24 : 20),
               decoration: BoxDecoration(color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
@@ -589,7 +582,6 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
             const SizedBox(height: 20),
 
-            // FORM ULASAN
             Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 24 : 20),
               decoration: BoxDecoration(color: Colors.white,
@@ -600,7 +592,6 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
 
             const SizedBox(height: 16),
 
-            // TOMBOL KEMBALI
             GestureDetector(
               onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
               child: Container(width: double.infinity, height: isTablet ? 52 : 48,
@@ -672,8 +663,7 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
             borderSide: BorderSide(color: Colors.grey.shade200)),
         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
             borderSide: const BorderSide(color: Color(0xFF3D5AFE), width: 2)),
-        contentPadding: const EdgeInsets.all(14)),
-    ),
+        contentPadding: const EdgeInsets.all(14))),
     const SizedBox(height: 16),
     GestureDetector(
       onTap: _isSubmitting ? null : _kirimUlasan,
@@ -720,9 +710,6 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
   Widget _divider() => Container(width: 1, height: 50, color: Colors.grey.shade100);
 }
 
-// ─────────────────────────────────────────────
-// BACKGROUND BLOB PAINTER
-// ─────────────────────────────────────────────
 class _BlobPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {

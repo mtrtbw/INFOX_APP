@@ -34,7 +34,7 @@ class _MateriDetailScreenState extends State<MateriDetailScreen>
     final fileName = (widget.data['nama_file'] ?? '').toString().trim();
     if (fileName.isEmpty) return '';
     final encoded = fileName.replaceAll(' ', '%20');
-    return 'http://10.5.50.231/infox-backend/uploads/materi/$encoded';
+    return 'http://192.168.100.82/infox-backend/uploads/materi/$encoded';
   }
 
   @override

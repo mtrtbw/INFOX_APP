@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class UlasanService {
-  static const baseUrl = 'http://10.5.50.231/infox-backend/api';
+  static const baseUrl = 'http://192.168.100.82/infox-backend/api';
 
   static Future<bool> simpanUlasan({
   required String nis,

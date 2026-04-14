@@ -2,8 +2,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 class NilaiService {
-  static const String baseUrl =
-      'http://10.5.50.231/infox-backend/api';
+  static const String baseUrl = 'http://192.168.100.82/infox-backend/api';
 
   static Future<void> simpanNilai({
     required String nis,
@@ -12,19 +11,21 @@ class NilaiService {
     required String noAbsen,
     required String idMateri,
     required int skor,
-    String jenisSoal = 'QUIZ',
+    String jenisSoal    = 'QUIZ',
+    String idPertemuan  = '',
   }) async {
     try {
       final url = Uri.parse('$baseUrl/simpan_nilai.php');
 
       final payload = {
-        "nis": nis,
-        "nama_siswa": nama,
-        "kelas": kelas,
-        "no_absen": noAbsen,
-        "id_materi": idMateri,
-        "skor": skor,
-        "jenis_soal": jenisSoal,
+        "nis"          : nis,
+        "nama_siswa"   : nama,
+        "kelas"        : kelas,
+        "no_absen"     : noAbsen,
+        "id_materi"    : idMateri.isNotEmpty ? idMateri : 'UMUM',
+        "skor"         : skor,
+        "jenis_soal"   : jenisSoal,
+        if (idPertemuan.isNotEmpty) "id_pertemuan": idPertemuan,
       };
 
       print('[NilaiService] POST $url');
