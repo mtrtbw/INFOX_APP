@@ -4,8 +4,8 @@ import 'package:flutter/services.dart';
 import '../../services/quiz_service.dart';
 import '../../services/nilai_service.dart';
 import '../../services/ulasan_service.dart';
+import '../../services/settings_service.dart'; // ← TAMBAH INI
 
-// ── Helper: parse teks & gambar (support URL & base64) ──
 Map<String, String> parseSoal(dynamic raw) {
   if (raw == null) return {'teks': '', 'gambar': ''};
   final s = raw.toString();
@@ -21,7 +21,6 @@ Map<String, String> parseSoal(dynamic raw) {
   return {'teks': s, 'gambar': ''};
 }
 
-// ── Widget gambar: support URL dan base64 data URL ──
 Widget _buildGambar(String gambar, {double? height, Color loadingColor = Colors.white54}) {
   if (gambar.isEmpty) return const SizedBox.shrink();
   if (gambar.startsWith('data:')) {
@@ -44,7 +43,7 @@ Widget _buildGambar(String gambar, {double? height, Color loadingColor = Colors.
 
 class SoalHarianScreen extends StatefulWidget {
   final String idMateri;
-  final String idPertemuan; // ← TAMBAHAN BARU
+  final String idPertemuan;
   final String nis;
   final String nama;
   final String kelas;
@@ -53,7 +52,7 @@ class SoalHarianScreen extends StatefulWidget {
   const SoalHarianScreen({
     super.key,
     required this.idMateri,
-    required this.idPertemuan, // ← TAMBAHAN BARU
+    required this.idPertemuan,
     required this.nis,
     required this.nama,
     required this.kelas,
@@ -65,7 +64,7 @@ class SoalHarianScreen extends StatefulWidget {
 }
 
 class _SoalHarianScreenState extends State<SoalHarianScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
 
   List<Map<String, dynamic>> soalList = [];
   bool    isLoading       = true;
@@ -73,6 +72,11 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
   int     score           = 0;
   String? selectedKey;
   bool    answered        = false;
+
+  // ── Anti-Screenshot ──
+  bool _isBlurred        = false;
+  bool _antiScreenshotOn = false; // ← TAMBAH INI: cache dari DB
+  static const _secureChannel = MethodChannel('com.example.infox_app/secure');
 
   late AnimationController _fadeController;
   late Animation<double>   _fadeAnim;
@@ -84,6 +88,8 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _enableSecureScreen(); // cek DB dulu
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     _fadeController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400));
@@ -91,11 +97,43 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
     _loadSoal();
   }
 
+  // ← UBAH INI: cek DB dulu, baru aktifkan FLAG_SECURE sesuai setting
+  Future<void> _enableSecureScreen() async {
+    _antiScreenshotOn = await SettingsService.isAntiScreenshotEnabled();
+    try {
+      await _secureChannel.invokeMethod('setSecure', {'secure': _antiScreenshotOn});
+      debugPrint('[AntiSS Harian] FLAG_SECURE = $_antiScreenshotOn');
+    } catch (e) {
+      debugPrint('[AntiSS Harian] channel error: $e');
+    }
+  }
+
+  Future<void> _disableSecureScreen() async {
+    try {
+      await _secureChannel.invokeMethod('setSecure', {'secure': false});
+    } catch (_) {}
+  }
+
+  // ← UBAH INI: blur hanya kalau anti-screenshot ON
   @override
-  void dispose() { _fadeController.dispose(); super.dispose(); }
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      if (_antiScreenshotOn) setState(() => _isBlurred = true);
+    } else if (state == AppLifecycleState.resumed) {
+      setState(() => _isBlurred = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _disableSecureScreen();
+    _fadeController.dispose();
+    super.dispose();
+  }
 
   Future<void> _loadSoal() async {
-    // ← Teruskan idPertemuan ke QuizService
     final data = await QuizService.getQuiz(
       widget.idMateri,
       tipe: 'HARIAN',
@@ -135,7 +173,7 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
       kelas:        widget.kelas,
       noAbsen:      widget.noAbsen,
       idMateri:     widget.idMateri,
-      idPertemuan:  widget.idPertemuan, // ← TAMBAHAN BARU
+      idPertemuan:  widget.idPertemuan,
       skor:         nilaiAkhir,
       jenisSoal:    'HARIAN',
     );
@@ -149,6 +187,54 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
           FadeTransition(opacity: anim, child: child),
       transitionDuration: const Duration(milliseconds: 300),
     ));
+  }
+
+  Widget _buildBobotBadge(Map<String, dynamic> soal) {
+    final bobot    = soal['bobot_efektif'] ?? soal['bobot_nilai'] ?? 0;
+    final mode     = soal['bobot_mode']?.toString() ?? 'otomatis';
+    final isManual = mode == 'manual';
+    final bobotText = bobot is double
+        ? bobot.toStringAsFixed(bobot % 1 == 0 ? 0 : 1)
+        : bobot.toString();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.20),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.35), width: 1),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(isManual ? Icons.balance_rounded : Icons.auto_awesome_rounded,
+            color: Colors.white, size: 12),
+        const SizedBox(width: 4),
+        Text('$bobotText poin', style: const TextStyle(
+            color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  Widget _buildBlurOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xFF1A1A2E),
+        child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(
+            width: 72, height: 72,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Icon(Icons.lock_rounded, color: Colors.white, size: 36),
+          ),
+          const SizedBox(height: 20),
+          const Text('Soal Dijeda', style: TextStyle(
+              color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text('Kembali ke aplikasi untuk melanjutkan',
+              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
+        ])),
+      ),
+    );
   }
 
   @override
@@ -167,6 +253,7 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
             : soalList.isEmpty
                 ? _buildEmpty(context)
                 : _buildSoal(pad, isTablet)),
+        if (_isBlurred) _buildBlurOverlay(),
       ]),
     );
   }
@@ -217,10 +304,12 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 16),
 
-          // ── APP BAR ──
           Row(children: [
             GestureDetector(
-              onTap: () => Navigator.pop(context),
+              onTap: () async {
+                await _disableSecureScreen();
+                if (context.mounted) Navigator.pop(context);
+              },
               child: Container(width: 44, height: 44,
                 decoration: BoxDecoration(color: Colors.white,
                   borderRadius: BorderRadius.circular(14),
@@ -241,7 +330,6 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
 
           const SizedBox(height: 20),
 
-          // ── PROGRESS ──
           Row(children: List.generate(soalList.length, (i) {
             final done = i < currentQuestion; final active = i == currentQuestion;
             return Expanded(child: Container(height: 6,
@@ -256,7 +344,6 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
 
           const SizedBox(height: 20),
 
-          // ── KARTU SOAL ──
           Container(
             width: double.infinity,
             padding: EdgeInsets.all(isTablet ? 22 : 18),
@@ -272,13 +359,17 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
                   decoration: BoxDecoration(shape: BoxShape.circle,
                       color: Colors.white.withOpacity(0.08)))),
               Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(color: Colors.white.withOpacity(0.20),
-                      borderRadius: BorderRadius.circular(20)),
-                  child: Text('📅 Soal Harian',
-                      style: TextStyle(color: Colors.white,
-                          fontSize: isTablet ? 12 : 11, fontWeight: FontWeight.w700))),
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(color: Colors.white.withOpacity(0.20),
+                        borderRadius: BorderRadius.circular(20)),
+                    child: Text('📅 Soal Harian',
+                        style: TextStyle(color: Colors.white,
+                            fontSize: isTablet ? 12 : 11, fontWeight: FontWeight.w700))),
+                  const SizedBox(width: 8),
+                  _buildBobotBadge(soal),
+                ]),
                 const SizedBox(height: 12),
                 Text(soalData['teks']!,
                     style: TextStyle(color: Colors.white,
@@ -286,23 +377,13 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
                         fontWeight: FontWeight.w700, height: 1.4)),
                 if ((soalData['gambar'] ?? '').isNotEmpty) ...[
                   const SizedBox(height: 12),
-                  ClipRRect(borderRadius: BorderRadius.circular(12),
-                    child: Image.network(soalData['gambar']!,
-                      fit: BoxFit.contain,
-                      loadingBuilder: (ctx, child, progress) => progress == null
-                          ? child
-                          : Container(height: 120, alignment: Alignment.center,
-                              child: const CircularProgressIndicator(
-                                  color: Colors.white54, strokeWidth: 2)),
-                      errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                    )),
+                  _buildGambar(soalData['gambar']!),
                 ],
               ]),
             ])),
 
           const SizedBox(height: 16),
 
-          // ── PILIHAN JAWABAN ──
           ...opsi.entries.map((entry) {
             final key        = entry.key;
             final opsiData   = parseSoal(entry.value);
@@ -362,15 +443,8 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
                               fontSize: isTablet ? 14 : 13)),
                     if ((opsiData['gambar'] ?? '').isNotEmpty) ...[
                       const SizedBox(height: 8),
-                      ClipRRect(borderRadius: BorderRadius.circular(10),
-                        child: Image.network(opsiData['gambar']!,
-                          height: 80, fit: BoxFit.contain,
-                          loadingBuilder: (ctx, child, progress) => progress == null
-                              ? child
-                              : const SizedBox(height: 80,
-                                  child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                        )),
+                      _buildGambar(opsiData['gambar']!, height: 80,
+                          loadingColor: Colors.grey),
                     ],
                   ])),
                   if (answered && isBenar)
@@ -388,7 +462,6 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
 
           const SizedBox(height: 16),
 
-          // ── TOMBOL LANJUT ──
           if (answered)
             GestureDetector(
               onTap: _nextQuestion,
@@ -423,11 +496,8 @@ class _SoalHarianScreenState extends State<SoalHarianScreen>
 // HASIL SCREEN + FORM ULASAN
 // ─────────────────────────────────────────────
 class _HasilHarianScreen extends StatefulWidget {
-  final String nama;
-  final String nis;
-  final int score;
-  final int total;
-  final int nilaiAkhir;
+  final String nama; final String nis;
+  final int score;   final int total; final int nilaiAkhir;
 
   const _HasilHarianScreen({
     required this.nama, required this.nis,
@@ -471,15 +541,11 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4FF),
       body: Stack(children: [
-        Positioned.fill(child: IgnorePointer(
-            child: CustomPaint(painter: _BlobPainter()))),
+        Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BlobPainter()))),
         SafeArea(child: SingleChildScrollView(
           padding: EdgeInsets.all(isTablet ? 32 : 24),
           child: Column(children: [
-
-            // HERO HASIL
-            Container(
-              width: double.infinity,
+            Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 32 : 28),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(28),
@@ -518,26 +584,18 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
                     backgroundColor: Colors.white.withOpacity(0.25),
                     valueColor: const AlwaysStoppedAnimation(Colors.white))),
               ])),
-
             const SizedBox(height: 20),
-
-            // FORM ULASAN
-            Container(
-              width: double.infinity,
+            Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 24 : 20),
               decoration: BoxDecoration(color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
                     blurRadius: 16, offset: const Offset(0, 6))]),
               child: _ulasanDikirim ? _buildSukses() : _buildFormUlasan(isTablet)),
-
             const SizedBox(height: 16),
-
-            // TOMBOL KEMBALI
             GestureDetector(
               onTap: () => Navigator.popUntil(context, (r) => r.isFirst),
-              child: Container(
-                width: double.infinity, height: isTablet ? 54 : 50,
+              child: Container(width: double.infinity, height: isTablet ? 54 : 50,
                 decoration: BoxDecoration(color: Colors.white,
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: Colors.grey.shade300),
@@ -549,7 +607,6 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
                   Text('Kembali ke Menu', style: TextStyle(color: Colors.grey.shade700,
                       fontWeight: FontWeight.w700, fontSize: isTablet ? 15 : 14)),
                 ]))),
-
             const SizedBox(height: 32),
           ]),
         )),
@@ -568,7 +625,7 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Beri Ulasan', style: TextStyle(fontSize: 16,
             fontWeight: FontWeight.w800, color: Color(0xFF1A1A2E))),
-        Text('Opsional · bantu kami berkembang 🙏',
+        Text('Opsional · berikan pendapatmu 🙏',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
       ]),
     ]),
@@ -583,22 +640,19 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
             margin: const EdgeInsets.symmetric(horizontal: 6),
             child: Text(i < _rating ? '★' : '☆',
                 style: TextStyle(fontSize: isTablet ? 42 : 36,
-                    color: i < _rating
-                        ? const Color(0xFFFFB300)
-                        : Colors.grey.shade300)))))),
+                    color: i < _rating ? const Color(0xFFFFB300) : Colors.grey.shade300)))))),
     if (_rating > 0)
       Center(child: Padding(padding: const EdgeInsets.only(top: 6),
         child: Text(
-          _rating == 5 ? '😍 Luar biasa!' : _rating == 4 ? '😊 Bagus!' :
-          _rating == 3 ? '😐 Cukup' : _rating == 2 ? '😕 Kurang' : '😞 Sangat kurang',
+          _rating==5?'😍 Luar biasa!':_rating==4?'😊 Bagus!':
+          _rating==3?'😐 Cukup':_rating==2?'😕 Kurang':'😞 Sangat kurang',
           style: TextStyle(fontSize: 13, color: Colors.grey.shade600,
               fontWeight: FontWeight.w600)))),
     const SizedBox(height: 16),
     const Text('Komentar', style: TextStyle(fontSize: 13,
         fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
     const SizedBox(height: 8),
-    TextFormField(
-      controller: _komentarCtrl, maxLines: 3, maxLength: 200,
+    TextFormField(controller: _komentarCtrl, maxLines: 3, maxLength: 200,
       style: const TextStyle(fontSize: 13, color: Color(0xFF1A1A2E)),
       decoration: InputDecoration(
         hintText: 'Tulis pendapatmu tentang soal ini...',
@@ -629,8 +683,7 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
       onTap: () => Navigator.popUntil(context, (r) => r.isFirst),
       child: Center(child: Text('Lewati',
           style: TextStyle(color: Colors.grey.shade500, fontSize: 13,
-              fontWeight: FontWeight.w600,
-              decoration: TextDecoration.underline)))),
+              fontWeight: FontWeight.w600, decoration: TextDecoration.underline)))),
   ]);
 
   Widget _buildSukses() => Column(children: [
@@ -640,7 +693,7 @@ class _HasilHarianScreenState extends State<_HasilHarianScreen> {
     const Text('Terima kasih!', style: TextStyle(fontSize: 18,
         fontWeight: FontWeight.w800, color: Color(0xFF1A1A2E))),
     const SizedBox(height: 6),
-    Text('Ulasan kamu sudah dikirim dan\nakan membantu kami berkembang.',
+    Text('Ulasan kamu sudah dikirim.',
         textAlign: TextAlign.center,
         style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
     const SizedBox(height: 8),

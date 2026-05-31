@@ -1,12 +1,14 @@
+// lib/services/notifikasi_service.dart
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 class NotifikasiService {
-  static const baseUrl = 'http://192.168.100.82/infox-backend/api';
+  static String get baseUrl => AppConfig.baseUrl;
 
   static final FlutterLocalNotificationsPlugin _notifPlugin =
       FlutterLocalNotificationsPlugin();
@@ -15,32 +17,28 @@ class NotifikasiService {
   static List<Map<String, dynamic>> _lastData = [];
   static Timer? _timer;
 
-  // Navigator key — dipakai untuk navigasi dari luar context
   static final GlobalKey<NavigatorState> navigatorKey =
       GlobalKey<NavigatorState>();
 
   // ── Init plugin + minta permission + setup tap handler ──
   static Future<void> init() async {
-    const android = AndroidInitializationSettings('@mipmap/ic_launcher');
+    const android  = AndroidInitializationSettings('@mipmap/ic_launcher');
     const settings = InitializationSettings(android: android);
 
     await _notifPlugin.initialize(
       settings,
-      // Dipanggil saat user tap notifikasi & app sudah terbuka / di background
       onDidReceiveNotificationResponse: (NotificationResponse response) {
         _bukaHalamanNotifikasi();
       },
     );
 
-    // Cek apakah app dibuka dari notifikasi (app dalam keadaan terminated)
     final launchDetails =
         await _notifPlugin.getNotificationAppLaunchDetails();
     if (launchDetails?.didNotificationLaunchApp == true) {
-      // Delay sebentar agar Navigator sudah siap
-      Future.delayed(const Duration(milliseconds: 500), _bukaHalamanNotifikasi);
+      Future.delayed(
+          const Duration(milliseconds: 500), _bukaHalamanNotifikasi);
     }
 
-    // Minta permission notifikasi (Android 13+ / API 33+)
     if (Platform.isAndroid) {
       final androidPlugin = _notifPlugin
           .resolvePlatformSpecificImplementation<
@@ -49,7 +47,6 @@ class NotifikasiService {
     }
   }
 
-  // ── Navigasi ke NotifikasiScreen ──
   static void _bukaHalamanNotifikasi() {
     navigatorKey.currentState?.pushNamed('/notifikasi');
   }
@@ -138,7 +135,6 @@ class NotifikasiService {
     }
   }
 
-  // ── Tampilkan notif di status bar HP ──
   static Future<void> _showLocalNotification(
       Map<String, dynamic> item) async {
     final androidDetails = AndroidNotificationDetails(

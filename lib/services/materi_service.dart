@@ -1,9 +1,10 @@
+// lib/services/materi_service.dart
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../config/app_config.dart';
 
 class MateriService {
-  static const String baseUrl =
-      'http://192.168.100.82/infox-backend/api';
+  static String get baseUrl => AppConfig.baseUrl;
 
   static Future<List<dynamic>> getMateri(String tipe) async {
     final response = await http.get(

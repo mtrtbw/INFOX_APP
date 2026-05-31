@@ -6,6 +6,7 @@ import 'package:flutter/services.dart';
 import '../../services/quiz_service.dart';
 import '../../services/nilai_service.dart';
 import '../../services/ulasan_service.dart';
+import '../../services/settings_service.dart'; // Service pengaturan Anda
 
 Map<String, String> parseSoal(dynamic raw) {
   if (raw == null) return {'teks': '', 'gambar': ''};
@@ -44,7 +45,7 @@ Widget _buildGambar(String gambar, {double? height, Color loadingColor = Colors.
 
 class QuizCepatScreen extends StatefulWidget {
   final String idMateri;
-  final String idPertemuan; // ← TAMBAHAN BARU
+  final String idPertemuan;
   final String nis;
   final String nama;
   final String kelas;
@@ -53,7 +54,7 @@ class QuizCepatScreen extends StatefulWidget {
   const QuizCepatScreen({
     super.key,
     required this.idMateri,
-    required this.idPertemuan, // ← TAMBAHAN BARU
+    required this.idPertemuan,
     required this.nis,
     required this.nama,
     required this.kelas,
@@ -65,10 +66,16 @@ class QuizCepatScreen extends StatefulWidget {
 }
 
 class _QuizCepatScreenState extends State<QuizCepatScreen>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
 
   List<Map<String, dynamic>> quizList = [];
   bool isLoading = true;
+
+  bool _isBlurred = false;
+  bool _antiScreenshotOn = false; 
+  
+  // ── Timer untuk auto-cek keamanan layar ──
+  Timer? _securityTimer;
 
   final AudioPlayer _bgmPlayer = AudioPlayer();
   bool _isMuted = false;
@@ -78,7 +85,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
   int timeLeft        = 30;
   String? selectedKey;
   bool answered       = false;
-  Timer? timer;
+  Timer? timer; // Timer untuk hitung mundur kuis
 
   late AnimationController _fadeController;
   late Animation<double>   _fadeAnim;
@@ -87,13 +94,63 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
   static const _bgColor      = Color(0xFFF0F4FF);
   static const _dark         = Color(0xFF1A1A2E);
 
+  static const _secureChannel = MethodChannel('com.example.infox_app/secure');
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    
+    // 1. Cek keamanan layar pertama kali
+    _enableSecureScreen();
+
+    // 2. Cek terus-menerus setiap 3 detik secara background
+    _securityTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      _enableSecureScreen();
+    });
+
     _fadeController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400));
     _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
     _loadQuiz();
+  }
+
+  // ── Cek DB dulu, baru aktifkan FLAG_SECURE ──
+  Future<void> _enableSecureScreen() async {
+    // Meminta status terbaru dari service Anda
+    _antiScreenshotOn = await SettingsService.isAntiScreenshotEnabled();
+    try {
+      await _secureChannel.invokeMethod(
+          'setSecure', {'secure': _antiScreenshotOn});
+      // debugPrint dinonaktifkan agar tidak spam di console setiap 3 detik
+    } catch (e) {
+      debugPrint('[AntiSS] channel error: $e');
+    }
+  }
+
+  Future<void> _disableSecureScreen() async {
+    try {
+      await _secureChannel.invokeMethod('setSecure', {'secure': false});
+    } catch (_) {}
+  }
+
+  // ── Blur hanya kalau anti-screenshot ON ──
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused) {
+      timer?.cancel();
+      if (_antiScreenshotOn) setState(() => _isBlurred = true);
+    } else if (state == AppLifecycleState.resumed) {
+      setState(() => _isBlurred = false);
+      if (!answered && !isLoading && quizList.isNotEmpty) {
+        timer = Timer.periodic(const Duration(seconds: 1), (t) {
+          if (!mounted) { t.cancel(); return; }
+          if (timeLeft == 0) { t.cancel(); _finishQuiz(); }
+          else { setState(() => timeLeft--); }
+        });
+      }
+    }
   }
 
   Future<void> _initAudio() async {
@@ -102,7 +159,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
       await _bgmPlayer.setVolume(0.5);
       await _bgmPlayer.play(AssetSource('sounds/Subway Surfers.mp3'));
     } catch (e) {
-      print('[BGM] error: $e');
+      debugPrint('[BGM] error: $e');
     }
   }
 
@@ -112,7 +169,6 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
   }
 
   Future<void> _loadQuiz() async {
-    // ← Teruskan idPertemuan ke QuizService
     final data = await QuizService.getQuiz(
       widget.idMateri,
       tipe: 'QUIZ',
@@ -159,6 +215,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
 
   Future<void> _finishQuiz() async {
     timer?.cancel();
+    _bgmPlayer.stop();
     final nilaiAkhir = quizList.isNotEmpty
         ? ((score / quizList.length) * 100).toInt() : 0;
 
@@ -168,7 +225,7 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
       kelas:       widget.kelas,
       noAbsen:     widget.noAbsen,
       idMateri:    widget.idMateri,
-      idPertemuan: widget.idPertemuan, // ← TAMBAHAN BARU
+      idPertemuan: widget.idPertemuan,
       skor:        nilaiAkhir,
       jenisSoal:   'QUIZ',
     );
@@ -184,8 +241,81 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
     ));
   }
 
+  Future<void> _confirmExit() async {
+    timer?.cancel();
+    _bgmPlayer.setVolume(0.0);
+
+    final keluar = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 0),
+        actionsPadding: const EdgeInsets.all(16),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 64, height: 64,
+            decoration: BoxDecoration(color: const Color(0xFFFFEBEE),
+                borderRadius: BorderRadius.circular(20)),
+            child: const Center(child: Text('⚠️', style: TextStyle(fontSize: 32)))),
+          const SizedBox(height: 16),
+          const Text('Keluar dari Quiz?',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800,
+                  color: Color(0xFF1A1A2E))),
+          const SizedBox(height: 8),
+          Text('Progress tidak akan tersimpan jika keluar sekarang.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 13, color: Colors.grey.shade500, height: 1.4)),
+        ]),
+        actions: [
+          SizedBox(width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF3D5AFE),
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  elevation: 0),
+              child: const Text('Lanjutkan Quiz',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14)))),
+          const SizedBox(height: 8),
+          SizedBox(width: double.infinity,
+            child: TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              style: TextButton.styleFrom(
+                  foregroundColor: Colors.grey.shade500,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12))),
+              child: const Text('Keluar Tanpa Simpan',
+                  style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13)))),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+    if (keluar == true) {
+      await _disableSecureScreen();
+      Navigator.pop(context);
+    } else {
+      _bgmPlayer.setVolume(_isMuted ? 0.0 : 0.5);
+      timer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) { t.cancel(); return; }
+        if (timeLeft == 0) { t.cancel(); _finishQuiz(); }
+        else { setState(() => timeLeft--); }
+      });
+    }
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    
+    // Hentikan timer keamanan saat keluar dari halaman
+    _securityTimer?.cancel(); 
+    _disableSecureScreen();
+    
     timer?.cancel();
     _fadeController.dispose();
     _bgmPlayer.stop();
@@ -209,6 +339,52 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
     return Colors.grey.shade200;
   }
 
+  Widget _buildBobotBadge(Map<String, dynamic> soal) {
+    final bobot    = soal['bobot_efektif'] ?? soal['bobot_nilai'] ?? 0;
+    final mode     = soal['bobot_mode']?.toString() ?? 'otomatis';
+    final isManual = mode == 'manual';
+    final bobotText = bobot is double
+        ? bobot.toStringAsFixed(bobot % 1 == 0 ? 0 : 1)
+        : bobot.toString();
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.20),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.35), width: 1),
+      ),
+      child: Row(mainAxisSize: MainAxisSize.min, children: [
+        Icon(isManual ? Icons.balance_rounded : Icons.auto_awesome_rounded,
+            color: Colors.white, size: 12),
+        const SizedBox(width: 4),
+        Text('$bobotText poin',
+            style: const TextStyle(color: Colors.white,
+                fontSize: 11, fontWeight: FontWeight.w700)),
+      ]),
+    );
+  }
+
+  Widget _buildBlurOverlay() {
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xFF1A1A2E),
+        child: Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Container(width: 72, height: 72,
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(20)),
+            child: const Icon(Icons.lock_rounded, color: Colors.white, size: 36)),
+          const SizedBox(height: 20),
+          const Text('Quiz Dijeda', style: TextStyle(
+              color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 8),
+          Text('Kembali ke aplikasi untuk melanjutkan',
+              style: TextStyle(color: Colors.white.withOpacity(0.6), fontSize: 13)),
+        ])),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final w        = MediaQuery.of(context).size.width;
@@ -218,22 +394,27 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
     if (isLoading) {
-      return Scaffold(backgroundColor: _bgColor,
-        body: Stack(children: [
-          Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BlobPainter()))),
-          const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
-            CircularProgressIndicator(color: Color(0xFF3D5AFE)),
-            SizedBox(height: 16),
-            Text('Memuat soal...', style: TextStyle(color: _dark, fontWeight: FontWeight.w600)),
-          ])),
-        ]));
+      return PopScope(canPop: false,
+        child: Scaffold(backgroundColor: _bgColor,
+          body: Stack(children: [
+            Positioned.fill(child: IgnorePointer(
+                child: CustomPaint(painter: _BlobPainter()))),
+            const Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+              CircularProgressIndicator(color: Color(0xFF3D5AFE)),
+              SizedBox(height: 16),
+              Text('Memuat soal...', style: TextStyle(
+                  color: _dark, fontWeight: FontWeight.w600)),
+            ])),
+          ])));
     }
 
     if (quizList.isEmpty) {
       return Scaffold(backgroundColor: _bgColor,
         body: Stack(children: [
-          Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BlobPainter()))),
-          SafeArea(child: Padding(padding: EdgeInsets.symmetric(horizontal: pad),
+          Positioned.fill(child: IgnorePointer(
+              child: CustomPaint(painter: _BlobPainter()))),
+          SafeArea(child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: pad),
             child: Column(children: [
               const SizedBox(height: 16),
               Row(children: [
@@ -241,18 +422,20 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
                   child: Container(width: 44, height: 44,
                     decoration: BoxDecoration(color: Colors.white,
                       borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
+                      boxShadow: [BoxShadow(
+                          color: Colors.black.withOpacity(0.07),
                           blurRadius: 12, offset: const Offset(0, 4))]),
                     child: const Icon(Icons.close_rounded, color: _dark, size: 20))),
                 const SizedBox(width: 14),
-                Text('Quiz Cepat', style: TextStyle(fontSize: isTablet ? 22 : 19,
+                Text('Ujian', style: TextStyle(
+                    fontSize: isTablet ? 22 : 19,
                     fontWeight: FontWeight.w800, color: _dark)),
               ]),
               const Spacer(),
               const Text('😔', style: TextStyle(fontSize: 60)),
               const SizedBox(height: 16),
-              const Text('Soal belum tersedia', style: TextStyle(fontSize: 18,
-                  fontWeight: FontWeight.w800, color: _dark)),
+              const Text('Soal belum tersedia', style: TextStyle(
+                  fontSize: 18, fontWeight: FontWeight.w800, color: _dark)),
               const SizedBox(height: 8),
               Text('Belum ada soal quiz untuk pertemuan ini.',
                   style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
@@ -261,211 +444,248 @@ class _QuizCepatScreenState extends State<QuizCepatScreen>
         ]));
     }
 
-    final soal     = quizList[currentQuestion];
-    final opsi     = soal['opsi'] as Map<String, dynamic>;
-    final soalData = parseSoal(soal['pertanyaan']);
+    final soal       = quizList[currentQuestion];
+    final opsi       = soal['opsi'] as Map<String, dynamic>;
+    final soalData   = parseSoal(soal['pertanyaan']);
     final timerRatio = timeLeft / 30;
     final timerColor = timeLeft > 15
         ? const Color(0xFF43A047)
         : timeLeft > 7 ? const Color(0xFFFF9800) : const Color(0xFFE53935);
 
-    return Scaffold(
-      backgroundColor: _bgColor,
-      body: Stack(children: [
-        Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BlobPainter()))),
-        SafeArea(child: FadeTransition(opacity: _fadeAnim,
-          child: SingleChildScrollView(
-            padding: EdgeInsets.symmetric(horizontal: pad),
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              const SizedBox(height: 16),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) { if (!didPop) _confirmExit(); },
+      child: Scaffold(
+        backgroundColor: _bgColor,
+        body: Stack(children: [
+          Positioned.fill(child: IgnorePointer(
+              child: CustomPaint(painter: _BlobPainter()))),
+          SafeArea(child: FadeTransition(opacity: _fadeAnim,
+            child: SingleChildScrollView(
+              padding: EdgeInsets.symmetric(horizontal: pad),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                const SizedBox(height: 16),
 
-              // ── APP BAR ──
-              Row(children: [
-                GestureDetector(onTap: () { timer?.cancel(); Navigator.pop(context); },
-                  child: Container(width: 44, height: 44,
-                    decoration: BoxDecoration(color: Colors.white,
-                      borderRadius: BorderRadius.circular(14),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
-                          blurRadius: 12, offset: const Offset(0, 4))]),
-                    child: const Icon(Icons.close_rounded, color: _dark, size: 20))),
-                const SizedBox(width: 14),
-                Expanded(child: Text('Quiz Cepat', style: TextStyle(
-                    fontSize: isTablet ? 22 : 19,
-                    fontWeight: FontWeight.w800, color: _dark))),
-                Container(padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(borderRadius: BorderRadius.circular(12),
-                      gradient: const LinearGradient(colors: _gradientBlue)),
-                  child: Text('⭐ $score', style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14))),
-                const SizedBox(width: 8),
-                GestureDetector(
-                  onTap: _toggleMute,
-                  child: Container(width: 40, height: 40,
-                    decoration: BoxDecoration(color: Colors.white,
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
-                          blurRadius: 10, offset: const Offset(0, 3))]),
-                    child: Icon(
-                      _isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
-                      color: const Color(0xFF3D5AFE), size: 20))),
-              ]),
-
-              const SizedBox(height: 20),
-
-              // ── PROGRESS BAR ──
-              Row(children: List.generate(quizList.length, (i) {
-                final done = i < currentQuestion, active = i == currentQuestion;
-                return Expanded(child: Container(
-                  margin: EdgeInsets.only(right: i < quizList.length - 1 ? 6 : 0),
-                  height: 5,
-                  decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(10),
-                    gradient: (active || done) ? const LinearGradient(colors: _gradientBlue) : null,
-                    color: (active || done) ? null : Colors.grey.shade200),
-                ));
-              })),
-              const SizedBox(height: 6),
-              Text('Soal ${currentQuestion + 1} dari ${quizList.length}',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade500,
-                      fontWeight: FontWeight.w500)),
-
-              const SizedBox(height: 16),
-
-              // ── TIMER ──
-              Container(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                decoration: BoxDecoration(color: Colors.white,
-                  borderRadius: BorderRadius.circular(16),
-                  boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
-                      blurRadius: 10, offset: const Offset(0, 3))]),
-                child: Row(children: [
-                  Icon(Icons.timer_rounded, color: timerColor, size: 20),
-                  const SizedBox(width: 10),
-                  Expanded(child: ClipRRect(borderRadius: BorderRadius.circular(6),
-                    child: LinearProgressIndicator(value: timerRatio, minHeight: 8,
-                      backgroundColor: Colors.grey.shade100,
-                      valueColor: AlwaysStoppedAnimation(timerColor)))),
-                  const SizedBox(width: 10),
-                  Text('$timeLeft', style: TextStyle(fontWeight: FontWeight.w800,
-                      fontSize: 16, color: timerColor)),
-                  Text(' detik', style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                ])),
-
-              const SizedBox(height: 16),
-
-              // ── QUESTION CARD ──
-              Container(width: double.infinity,
-                padding: EdgeInsets.all(isTablet ? 22 : 18),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  gradient: const LinearGradient(colors: _gradientBlue,
-                      begin: Alignment.topLeft, end: Alignment.bottomRight),
-                  boxShadow: [BoxShadow(color: const Color(0xFF3D5AFE).withOpacity(0.35),
-                      blurRadius: 20, offset: const Offset(0, 8))]),
-                child: Stack(children: [
-                  Positioned(right: -20, top: -20,
-                    child: Container(width: 90, height: 90,
-                      decoration: BoxDecoration(shape: BoxShape.circle,
-                          color: Colors.white.withOpacity(0.08)))),
-                  Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    Container(padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                      decoration: BoxDecoration(color: Colors.white.withOpacity(0.20),
-                          borderRadius: BorderRadius.circular(20)),
-                      child: Text('⚡ Quiz Cepat',
-                          style: TextStyle(color: Colors.white,
-                              fontSize: isTablet ? 12 : 11, fontWeight: FontWeight.w700))),
-                    const SizedBox(height: 12),
-                    Text(soalData['teks']!,
-                        style: TextStyle(color: Colors.white,
-                            fontSize: isTablet ? 18 : 16,
-                            fontWeight: FontWeight.w700, height: 1.4)),
-                    if ((soalData['gambar'] ?? '').isNotEmpty) ...[
-                      const SizedBox(height: 12),
-                      ClipRRect(borderRadius: BorderRadius.circular(12),
-                        child: Image.network(soalData['gambar']!,
-                          fit: BoxFit.contain,
-                          loadingBuilder: (ctx, child, progress) => progress == null
-                              ? child
-                              : Container(height: 120, alignment: Alignment.center,
-                                  child: const CircularProgressIndicator(
-                                      color: Colors.white54, strokeWidth: 2)),
-                          errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                        )),
-                    ],
-                  ]),
-                ])),
-
-              const SizedBox(height: 16),
-
-              // ── OPSI JAWABAN ──
-              ...opsi.entries.map((entry) {
-                final key      = entry.key;
-                final opsiData = parseSoal(entry.value);
-                final correct  = quizList[currentQuestion]['jawaban_benar'];
-                final isCorrect = answered && key == correct;
-                final isWrong   = answered && key == selectedKey && key != correct;
-
-                return GestureDetector(
-                  onTap: () => _answerQuestion(key),
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    margin: const EdgeInsets.only(bottom: 10),
-                    padding: EdgeInsets.symmetric(
-                        horizontal: isTablet ? 18 : 16,
-                        vertical: isTablet ? 14 : 12),
+                // APP BAR
+                Row(children: [
+                  GestureDetector(onTap: _confirmExit,
+                    child: Container(width: 44, height: 44,
+                      decoration: BoxDecoration(color: Colors.white,
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [BoxShadow(
+                            color: Colors.black.withOpacity(0.07),
+                            blurRadius: 12, offset: const Offset(0, 4))]),
+                      child: const Icon(Icons.close_rounded, color: _dark, size: 20))),
+                  const SizedBox(width: 14),
+                  Expanded(child: Text('Ujian', style: TextStyle(
+                      fontSize: isTablet ? 22 : 19,
+                      fontWeight: FontWeight.w800, color: _dark))),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                     decoration: BoxDecoration(
-                      color: _optionBg(key),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: _optionBorder(key), width: 1.5),
-                      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04),
-                          blurRadius: 8, offset: const Offset(0, 3))]),
-                    child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Container(width: 32, height: 32,
-                        decoration: BoxDecoration(borderRadius: BorderRadius.circular(10),
-                          gradient: !answered
-                              ? const LinearGradient(colors: _gradientBlue)
-                              : isCorrect
-                                  ? const LinearGradient(colors: [Color(0xFF2E7D52), Color(0xFF43A047)])
-                                  : isWrong
-                                      ? const LinearGradient(colors: [Color(0xFFE53935), Color(0xFFFF7043)])
-                                      : null,
-                          color: (answered && !isCorrect && !isWrong) ? Colors.grey.shade200 : null),
-                        child: Center(child: isCorrect
-                            ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
-                            : isWrong
-                                ? const Icon(Icons.close_rounded, color: Colors.white, size: 16)
-                                : Text(key, style: TextStyle(
-                                    color: !answered ? Colors.white : Colors.grey.shade500,
-                                    fontWeight: FontWeight.w800, fontSize: 13)))),
-                      const SizedBox(width: 12),
-                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        if ((opsiData['teks'] ?? '').isNotEmpty)
-                          Text(opsiData['teks']!,
-                              style: TextStyle(fontSize: isTablet ? 14 : 13,
-                                  fontWeight: FontWeight.w600,
-                                  color: isCorrect ? const Color(0xFF2E7D52)
-                                      : isWrong ? const Color(0xFFE53935) : _dark)),
-                        if ((opsiData['gambar'] ?? '').isNotEmpty) ...[
-                          const SizedBox(height: 8),
-                          ClipRRect(borderRadius: BorderRadius.circular(10),
-                            child: Image.network(opsiData['gambar']!,
-                              height: 80, fit: BoxFit.contain,
-                              loadingBuilder: (ctx, child, progress) => progress == null
-                                  ? child
-                                  : const SizedBox(height: 80,
-                                      child: Center(child: CircularProgressIndicator(strokeWidth: 2))),
-                              errorBuilder: (_, __, ___) => const SizedBox.shrink(),
-                            )),
-                        ],
-                      ])),
-                    ]),
-                  ),
-                );
-              }),
+                        borderRadius: BorderRadius.circular(12),
+                        gradient: const LinearGradient(colors: _gradientBlue)),
+                    child: Text('⭐ $score', style: const TextStyle(
+                        color: Colors.white, fontWeight: FontWeight.w800,
+                        fontSize: 14))),
+                  const SizedBox(width: 8),
+                  GestureDetector(onTap: _toggleMute,
+                    child: Container(width: 40, height: 40,
+                      decoration: BoxDecoration(color: Colors.white,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [BoxShadow(
+                            color: Colors.black.withOpacity(0.07),
+                            blurRadius: 10, offset: const Offset(0, 3))]),
+                      child: Icon(
+                          _isMuted
+                              ? Icons.volume_off_rounded
+                              : Icons.volume_up_rounded,
+                          color: const Color(0xFF3D5AFE), size: 20))),
+                ]),
 
-              const SizedBox(height: 32),
-            ]),
-          ))),
-      ]),
+                const SizedBox(height: 20),
+
+                // PROGRESS BAR
+                Row(children: List.generate(quizList.length, (i) {
+                  final done = i < currentQuestion, active = i == currentQuestion;
+                  return Expanded(child: Container(
+                    margin: EdgeInsets.only(
+                        right: i < quizList.length - 1 ? 6 : 0),
+                    height: 5,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      gradient: (active || done)
+                          ? const LinearGradient(colors: _gradientBlue)
+                          : null,
+                      color: (active || done) ? null : Colors.grey.shade200)));
+                })),
+                const SizedBox(height: 6),
+                Text('Soal ${currentQuestion + 1} dari ${quizList.length}',
+                    style: TextStyle(fontSize: 12, color: Colors.grey.shade500,
+                        fontWeight: FontWeight.w500)),
+
+                const SizedBox(height: 16),
+
+                // TIMER
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 10, offset: const Offset(0, 3))]),
+                  child: Row(children: [
+                    Icon(Icons.timer_rounded, color: timerColor, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: LinearProgressIndicator(
+                          value: timerRatio, minHeight: 8,
+                          backgroundColor: Colors.grey.shade100,
+                          valueColor: AlwaysStoppedAnimation(timerColor)))),
+                    const SizedBox(width: 10),
+                    Text('$timeLeft', style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 16, color: timerColor)),
+                    Text(' detik', style: TextStyle(
+                        fontSize: 12, color: Colors.grey.shade500)),
+                  ])),
+
+                const SizedBox(height: 16),
+
+                // QUESTION CARD
+                Container(width: double.infinity,
+                  padding: EdgeInsets.all(isTablet ? 22 : 18),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(20),
+                    gradient: const LinearGradient(colors: _gradientBlue,
+                        begin: Alignment.topLeft, end: Alignment.bottomRight),
+                    boxShadow: [BoxShadow(
+                        color: const Color(0xFF3D5AFE).withOpacity(0.35),
+                        blurRadius: 20, offset: const Offset(0, 8))]),
+                  child: Stack(children: [
+                    Positioned(right: -20, top: -20,
+                      child: Container(width: 90, height: 90,
+                        decoration: BoxDecoration(shape: BoxShape.circle,
+                            color: Colors.white.withOpacity(0.08)))),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                      Row(children: [
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.20),
+                              borderRadius: BorderRadius.circular(20)),
+                          child: Text('⚡ Ujian',
+                              style: TextStyle(color: Colors.white,
+                                  fontSize: isTablet ? 12 : 11,
+                                  fontWeight: FontWeight.w700))),
+                        const SizedBox(width: 8),
+                        _buildBobotBadge(soal),
+                      ]),
+                      const SizedBox(height: 12),
+                      Text(soalData['teks']!, style: TextStyle(
+                          color: Colors.white,
+                          fontSize: isTablet ? 18 : 16,
+                          fontWeight: FontWeight.w700, height: 1.4)),
+                      if ((soalData['gambar'] ?? '').isNotEmpty) ...[
+                        const SizedBox(height: 12),
+                        _buildGambar(soalData['gambar']!),
+                      ],
+                    ]),
+                  ])),
+
+                const SizedBox(height: 16),
+
+                // OPSI JAWABAN
+                ...opsi.entries.map((entry) {
+                  final key      = entry.key;
+                  final opsiData = parseSoal(entry.value);
+                  final correct  = quizList[currentQuestion]['jawaban_benar'];
+                  final isCorrect = answered && key == correct;
+                  final isWrong   = answered && key == selectedKey && key != correct;
+
+                  return GestureDetector(
+                    onTap: () => _answerQuestion(key),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 250),
+                      margin: const EdgeInsets.only(bottom: 10),
+                      padding: EdgeInsets.symmetric(
+                          horizontal: isTablet ? 18 : 16,
+                          vertical: isTablet ? 14 : 12),
+                      decoration: BoxDecoration(
+                        color: _optionBg(key),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: _optionBorder(key), width: 1.5),
+                        boxShadow: [BoxShadow(
+                            color: Colors.black.withOpacity(0.04),
+                            blurRadius: 8, offset: const Offset(0, 3))]),
+                      child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Container(width: 32, height: 32,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(10),
+                            gradient: !answered
+                                ? const LinearGradient(colors: _gradientBlue)
+                                : isCorrect
+                                    ? const LinearGradient(colors: [
+                                        Color(0xFF2E7D52), Color(0xFF43A047)])
+                                    : isWrong
+                                        ? const LinearGradient(colors: [
+                                            Color(0xFFE53935),
+                                            Color(0xFFFF7043)])
+                                        : null,
+                            color: (answered && !isCorrect && !isWrong)
+                                ? Colors.grey.shade200 : null),
+                          child: Center(child: isCorrect
+                              ? const Icon(Icons.check_rounded,
+                                  color: Colors.white, size: 16)
+                              : isWrong
+                                  ? const Icon(Icons.close_rounded,
+                                      color: Colors.white, size: 16)
+                                  : Text(key, style: TextStyle(
+                                      color: !answered
+                                          ? Colors.white
+                                          : Colors.grey.shade500,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: 13)))),
+                        const SizedBox(width: 12),
+                        Expanded(child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                          if ((opsiData['teks'] ?? '').isNotEmpty)
+                            Text(opsiData['teks']!, style: TextStyle(
+                                fontSize: isTablet ? 14 : 13,
+                                fontWeight: FontWeight.w600,
+                                color: isCorrect
+                                    ? const Color(0xFF2E7D52)
+                                    : isWrong
+                                        ? const Color(0xFFE53935)
+                                        : _dark)),
+                          if ((opsiData['gambar'] ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            _buildGambar(opsiData['gambar']!,
+                                height: 80,
+                                loadingColor: Colors.grey),
+                          ],
+                        ])),
+                      ]),
+                    ),
+                  );
+                }),
+
+                const SizedBox(height: 32),
+              ]),
+            ))),
+
+          if (_isBlurred) _buildBlurOverlay(),
+        ]),
+      ),
     );
   }
 }
@@ -481,10 +701,8 @@ class QuizResultScreen extends StatefulWidget {
 
   const QuizResultScreen({
     super.key,
-    required this.score,
-    required this.total,
-    required this.nama,
-    required this.nis,
+    required this.score, required this.total,
+    required this.nama,  required this.nis,
   });
 
   @override
@@ -506,7 +724,8 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     setState(() => _isSubmitting = true);
     final ok = await UlasanService.simpanUlasan(
       nis: widget.nis, namaSiswa: widget.nama, jenisSoal: 'QUIZ',
-      rating: _rating == 0 ? 5 : _rating, komentar: _komentarCtrl.text.trim(),
+      rating: _rating == 0 ? 5 : _rating,
+      komentar: _komentarCtrl.text.trim(),
     );
     setState(() { _isSubmitting = false; _ulasanDikirim = ok; });
   }
@@ -516,95 +735,114 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     final w        = MediaQuery.of(context).size.width;
     final isTablet = w > 600;
     final pad      = isTablet ? 28.0 : 20.0;
-    final benar    = widget.total > 0 ? (widget.score * widget.total / 100).round() : 0;
+    final benar    = widget.total > 0
+        ? (widget.score * widget.total / 100).round() : 0;
     final salah    = widget.total - benar;
 
     final (emoji, label, gradient) = widget.score >= 80
-        ? ('🏆', 'Luar Biasa!', [const Color(0xFFFFCA28), const Color(0xFFFF6F00)])
-        : widget.score >= 50
-            ? ('👍', 'Bagus!', [const Color(0xFF3D5AFE), const Color(0xFF7C4DFF)])
-            : ('💪', 'Terus Semangat!', [const Color(0xFFE53935), const Color(0xFFFF7043)]);
+        ? ('🏆', 'Luar Biasa!',
+            [const Color(0xFFFFCA28), const Color(0xFFFF6F00)])
+        : widget.score >= 70
+            ? ('👍', 'Bagus!',
+                [const Color(0xFF3D5AFE), const Color(0xFF7C4DFF)])
+            : ('💪', 'Terus Semangat!',
+                [const Color(0xFFE53935), const Color(0xFFFF7043)]);
 
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4FF),
       body: Stack(children: [
-        Positioned.fill(child: IgnorePointer(child: CustomPaint(painter: _BlobPainter()))),
+        Positioned.fill(child: IgnorePointer(
+            child: CustomPaint(painter: _BlobPainter()))),
         SafeArea(child: SingleChildScrollView(
           padding: EdgeInsets.symmetric(horizontal: pad),
           child: Column(children: [
             const SizedBox(height: 40),
-
             Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 32 : 28),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(28),
                 gradient: LinearGradient(colors: gradient,
                     begin: Alignment.topLeft, end: Alignment.bottomRight),
-                boxShadow: [BoxShadow(color: gradient[0].withOpacity(0.40),
+                boxShadow: [BoxShadow(
+                    color: gradient[0].withOpacity(0.40),
                     blurRadius: 28, offset: const Offset(0, 12))]),
               child: Column(children: [
-                Text(emoji, style: TextStyle(fontSize: isTablet ? 72 : 60)),
+                Text(emoji, style: TextStyle(
+                    fontSize: isTablet ? 72 : 60)),
                 const SizedBox(height: 12),
                 Text(label, style: TextStyle(color: Colors.white,
-                    fontSize: isTablet ? 28 : 24, fontWeight: FontWeight.w900)),
+                    fontSize: isTablet ? 28 : 24,
+                    fontWeight: FontWeight.w900)),
                 const SizedBox(height: 4),
                 Text('Hei ${widget.nama}, quiz selesai!',
-                    style: TextStyle(color: Colors.white.withOpacity(0.85),
+                    style: TextStyle(
+                        color: Colors.white.withOpacity(0.85),
                         fontSize: isTablet ? 15 : 13)),
               ])),
-
             const SizedBox(height: 20),
-
             Container(padding: EdgeInsets.all(isTablet ? 24 : 20),
               decoration: BoxDecoration(color: Colors.white,
                 borderRadius: BorderRadius.circular(20),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
+                boxShadow: [BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
                     blurRadius: 14, offset: const Offset(0, 5))]),
               child: Column(children: [
                 Row(children: [
-                  _statItem('📊', 'Nilai', '${widget.score}', const Color(0xFF3D5AFE), isTablet),
+                  _statItem('📊', 'Nilai', '${widget.score}',
+                      const Color(0xFF3D5AFE), isTablet),
                   _divider(),
-                  _statItem('✅', 'Benar', '$benar', const Color(0xFF43A047), isTablet),
+                  _statItem('✅', 'Benar', '$benar',
+                      const Color(0xFF43A047), isTablet),
                   _divider(),
-                  _statItem('❌', 'Salah', '$salah', const Color(0xFFE53935), isTablet),
+                  _statItem('❌', 'Salah', '$salah',
+                      const Color(0xFFE53935), isTablet),
                 ]),
                 const SizedBox(height: 16),
                 ClipRRect(borderRadius: BorderRadius.circular(8),
-                  child: LinearProgressIndicator(value: widget.score / 100,
-                    minHeight: 10, backgroundColor: Colors.grey.shade100,
-                    valueColor: AlwaysStoppedAnimation(gradient[0]))),
+                  child: LinearProgressIndicator(
+                      value: widget.score / 100,
+                      minHeight: 10,
+                      backgroundColor: Colors.grey.shade100,
+                      valueColor: AlwaysStoppedAnimation(gradient[0]))),
                 const SizedBox(height: 8),
                 Text('Nilai akhir: ${widget.score} dari 100',
-                    style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+                    style: TextStyle(
+                        fontSize: 13, color: Colors.grey.shade500)),
               ])),
-
             const SizedBox(height: 20),
-
             Container(width: double.infinity,
               padding: EdgeInsets.all(isTablet ? 24 : 20),
               decoration: BoxDecoration(color: Colors.white,
                 borderRadius: BorderRadius.circular(24),
-                boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
+                boxShadow: [BoxShadow(
+                    color: Colors.black.withOpacity(0.05),
                     blurRadius: 16, offset: const Offset(0, 6))]),
-              child: _ulasanDikirim ? _buildSukses() : _buildFormUlasan(isTablet)),
-
+              child: _ulasanDikirim
+                  ? _buildSukses()
+                  : _buildFormUlasan(isTablet)),
             const SizedBox(height: 16),
-
             GestureDetector(
-              onTap: () => Navigator.popUntil(context, (route) => route.isFirst),
-              child: Container(width: double.infinity, height: isTablet ? 52 : 48,
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(16),
-                  color: Colors.white,
-                  border: Border.all(color: Colors.grey.shade200, width: 1.5)),
-                child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  Icon(Icons.home_rounded, color: Colors.grey.shade500, size: 18),
+              onTap: () =>
+                  Navigator.popUntil(context, (route) => route.isFirst),
+              child: Container(width: double.infinity,
+                height: isTablet ? 52 : 48,
+                decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.white,
+                    border: Border.all(
+                        color: Colors.grey.shade200, width: 1.5)),
+                child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center, children: [
+                  Icon(Icons.home_rounded,
+                      color: Colors.grey.shade500, size: 18),
                   const SizedBox(width: 8),
-                  Text('Kembali ke Menu', style: TextStyle(color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w700, fontSize: isTablet ? 15 : 14)),
+                  Text('Kembali ke Menu', style: TextStyle(
+                      color: Colors.grey.shade600,
+                      fontWeight: FontWeight.w700,
+                      fontSize: isTablet ? 15 : 14)),
                 ]))),
-
             const SizedBox(height: 32),
           ]),
         )),
@@ -612,18 +850,19 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     );
   }
 
-  Widget _buildFormUlasan(bool isTablet) => Column(
-    crossAxisAlignment: CrossAxisAlignment.start, children: [
+  Widget _buildFormUlasan(bool isTablet) =>
+      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
     Row(children: [
       Container(width: 40, height: 40,
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(12),
             gradient: const LinearGradient(colors: _gradientBlue)),
-        child: const Icon(Icons.rate_review_rounded, color: Colors.white, size: 20)),
+        child: const Icon(Icons.rate_review_rounded,
+            color: Colors.white, size: 20)),
       const SizedBox(width: 12),
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         const Text('Beri Ulasan', style: TextStyle(fontSize: 16,
             fontWeight: FontWeight.w800, color: Color(0xFF1A1A2E))),
-        Text('Opsional · bantu kami berkembang 🙏',
+        Text('Opsional · berikan pendapatmu 🙏',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
       ]),
     ]),
@@ -634,24 +873,28 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     Row(mainAxisAlignment: MainAxisAlignment.center,
         children: List.generate(5, (i) => GestureDetector(
           onTap: () => setState(() => _rating = i + 1),
-          child: AnimatedContainer(duration: const Duration(milliseconds: 200),
-            margin: const EdgeInsets.symmetric(horizontal: 6),
-            child: Text(i < _rating ? '★' : '☆',
-                style: TextStyle(fontSize: isTablet ? 42 : 36,
-                    color: i < _rating ? const Color(0xFFFFB300) : Colors.grey.shade300)))))),
+          child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              margin: const EdgeInsets.symmetric(horizontal: 6),
+              child: Text(i < _rating ? '★' : '☆',
+                  style: TextStyle(
+                      fontSize: isTablet ? 42 : 36,
+                      color: i < _rating
+                          ? const Color(0xFFFFB300)
+                          : Colors.grey.shade300)))))),
     if (_rating > 0)
       Center(child: Padding(padding: const EdgeInsets.only(top: 6),
         child: Text(
-          _rating == 5 ? '😍 Luar biasa!' : _rating == 4 ? '😊 Bagus!' :
-          _rating == 3 ? '😐 Cukup' : _rating == 2 ? '😕 Kurang' : '😞 Sangat kurang',
+          _rating == 5 ? '😍 Luar biasa!' : _rating == 4 ? '😊 Bagus!'
+              : _rating == 3 ? '😐 Cukup' : _rating == 2 ? '😕 Kurang'
+              : '😞 Sangat kurang',
           style: TextStyle(fontSize: 13, color: Colors.grey.shade600,
               fontWeight: FontWeight.w600)))),
     const SizedBox(height: 16),
     const Text('Komentar', style: TextStyle(fontSize: 13,
         fontWeight: FontWeight.w700, color: Color(0xFF1A1A2E))),
     const SizedBox(height: 8),
-    TextFormField(
-      controller: _komentarCtrl, maxLines: 3, maxLength: 200,
+    TextFormField(controller: _komentarCtrl, maxLines: 3, maxLength: 200,
       style: const TextStyle(fontSize: 13, color: Color(0xFF1A1A2E)),
       decoration: InputDecoration(
         hintText: 'Tulis pendapatmu tentang quiz ini...',
@@ -670,19 +913,23 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
       child: Container(width: double.infinity, height: 48,
         decoration: BoxDecoration(borderRadius: BorderRadius.circular(14),
           gradient: const LinearGradient(colors: _gradientBlue),
-          boxShadow: [BoxShadow(color: const Color(0xFF3D5AFE).withOpacity(0.35),
+          boxShadow: [BoxShadow(
+              color: const Color(0xFF3D5AFE).withOpacity(0.35),
               blurRadius: 12, offset: const Offset(0, 5))]),
         child: Center(child: _isSubmitting
             ? const SizedBox(width: 22, height: 22,
-                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
-            : const Text('Kirim Ulasan', style: TextStyle(color: Colors.white,
-                fontWeight: FontWeight.w800, fontSize: 14))))),
+                child: CircularProgressIndicator(
+                    color: Colors.white, strokeWidth: 2.5))
+            : const Text('Kirim Ulasan', style: TextStyle(
+                color: Colors.white, fontWeight: FontWeight.w800,
+                fontSize: 14))))),
     const SizedBox(height: 10),
     GestureDetector(
       onTap: () => Navigator.popUntil(context, (r) => r.isFirst),
       child: Center(child: Text('Lewati',
           style: TextStyle(color: Colors.grey.shade500, fontSize: 13,
-              fontWeight: FontWeight.w600, decoration: TextDecoration.underline)))),
+              fontWeight: FontWeight.w600,
+              decoration: TextDecoration.underline)))),
   ]);
 
   Widget _buildSukses() => Column(children: [
@@ -698,16 +945,19 @@ class _QuizResultScreenState extends State<QuizResultScreen> {
     const SizedBox(height: 8),
   ]);
 
-  Widget _statItem(String emoji, String label, String value, Color color, bool isTablet) =>
-    Expanded(child: Column(children: [
-      Text(emoji, style: TextStyle(fontSize: isTablet ? 24 : 20)),
-      const SizedBox(height: 4),
-      Text(value, style: TextStyle(fontSize: isTablet ? 22 : 20,
-          fontWeight: FontWeight.w900, color: color)),
-      Text(label, style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-    ]));
+  Widget _statItem(String emoji, String label, String value,
+      Color color, bool isTablet) =>
+      Expanded(child: Column(children: [
+        Text(emoji, style: TextStyle(fontSize: isTablet ? 24 : 20)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(fontSize: isTablet ? 22 : 20,
+            fontWeight: FontWeight.w900, color: color)),
+        Text(label, style: TextStyle(
+            fontSize: 11, color: Colors.grey.shade500)),
+      ]));
 
-  Widget _divider() => Container(width: 1, height: 50, color: Colors.grey.shade100);
+  Widget _divider() =>
+      Container(width: 1, height: 50, color: Colors.grey.shade100);
 }
 
 class _BlobPainter extends CustomPainter {

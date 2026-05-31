@@ -152,7 +152,7 @@ class _MateriListScreenState extends State<MateriListScreen>
                         // ── SEARCH BAR ──
                         _SearchBar(
                           hintText: isPdf
-                              ? 'Cari modul PDF...'
+                              ? 'Cari modul...'
                               : 'Cari video pembelajaran...',
                           accentColor: _accentColor,
                           query: searchQuery,
@@ -196,7 +196,7 @@ class _MateriListScreenState extends State<MateriListScreen>
                           )
                         else
                           _SectionTitle(
-                            text: isPdf ? 'Semua Modul PDF' : 'Semua Video',
+                            text: isPdf ? 'Semua Modul' : 'Semua Video',
                             isTablet: isTablet,
                           ),
 
@@ -317,7 +317,7 @@ class _MateriListScreenState extends State<MateriListScreen>
           Text(
             searchQuery.isEmpty
                 ? (isPdf
-                    ? 'Belum ada materi PDF'
+                    ? 'Belum ada materi'
                     : 'Belum ada video pembelajaran')
                 : 'Tidak ada hasil untuk\n"$searchQuery"',
             style: TextStyle(
@@ -559,7 +559,7 @@ class _HeaderBanner extends StatelessWidget {
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(
-                        isPdf ? '📄 Modul PDF' : '🎬 Video Belajar',
+                        isPdf ? '📄 Modul' : '🎬 Video Belajar',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: isTablet ? 12.5 : 11.5,
@@ -580,7 +580,7 @@ class _HeaderBanner extends StatelessWidget {
                     SizedBox(height: isTablet ? 6 : 4),
                     Text(
                       isPdf
-                          ? 'Temukan modul PDF untuk\nmenunjang belajarmu.'
+                          ? 'Temukan modul untuk\nmenunjang belajarmu.'
                           : 'Tonton video supaya materi\nlebih mudah dipahami.',
                       style: TextStyle(
                         color: Colors.white.withOpacity(0.85),

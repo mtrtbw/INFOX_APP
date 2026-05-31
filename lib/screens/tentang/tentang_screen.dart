@@ -134,7 +134,7 @@ class TentangScreen extends StatelessWidget {
                           TextSpan(text: 'Kami mengutamakan kemudahan akses, sehingga '),
                           TextSpan(text: 'siswa tidak perlu login akun',
                               style: TextStyle(fontWeight: FontWeight.w700, color: Color(0xFF3D5AFE))),
-                          TextSpan(text: ' untuk mulai belajar. Materi disajikan secara ringkas, visual, dan mudah dipahami.'),
+                          TextSpan(text: ' untuk membuka materi. Materi disajikan secara ringkas, visual, dan mudah dipahami.'),
                         ],
                       ),
                     ),
@@ -232,7 +232,7 @@ class TentangScreen extends StatelessWidget {
                   children: [
                     Text('Versi Aplikasi 1.0.0', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
                     const SizedBox(height: 3),
-                    Text('© 2025 Infox. All rights reserved.', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+                    Text('© 2026 Infox. All rights reserved.', style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
                   ],
                 ),
               ),

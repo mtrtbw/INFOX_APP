@@ -1,8 +1,11 @@
+// lib/screens/soal/soal_harian_form_screen.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import '../../config/app_config.dart'; // ✅ Ganti IP cukup di app_config.dart
 import 'soal_harian_pertemuan_screen.dart';
+import 'lupa_password_screen.dart';
 
 class SoalHarianFormScreen extends StatefulWidget {
   final String idMateri;
@@ -15,7 +18,9 @@ class SoalHarianFormScreen extends StatefulWidget {
 class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
     with SingleTickerProviderStateMixin {
 
-  static const baseUrl        = 'http://192.168.100.82/infox-backend/api';
+  // ✅ Pakai AppConfig — tidak ada lagi hardcode IP di sini
+  static String get _baseUrl => AppConfig.baseUrl;
+
   static const _gradientGreen = [Color(0xFF2E7D52), Color(0xFF43A047)];
   static const _bgColor       = Color(0xFFF0F4FF);
   static const _dark          = Color(0xFF1A1A2E);
@@ -37,7 +42,8 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
     SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle.dark);
     _fadeController = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 500));
-    _fadeAnim = CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
+    _fadeAnim =
+        CurvedAnimation(parent: _fadeController, curve: Curves.easeOut);
     _fadeController.forward();
   }
 
@@ -55,7 +61,7 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
 
     try {
       final res = await http.post(
-        Uri.parse('$baseUrl/login_siswa.php'),
+        Uri.parse('$_baseUrl/login_siswa.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'nis'     : _nisCtrl.text.trim(),
@@ -90,6 +96,18 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
     }
   }
 
+  void _bukaLupaPassword() {
+    Navigator.push(context, PageRouteBuilder(
+      pageBuilder: (_, anim, __) => const LupaPasswordScreen(
+        gradientColors: _gradientGreen,
+        labelJenis: '📅 Soal Harian',
+      ),
+      transitionsBuilder: (_, anim, __, child) =>
+          FadeTransition(opacity: anim, child: child),
+      transitionDuration: const Duration(milliseconds: 300),
+    ));
+  }
+
   @override
   Widget build(BuildContext context) {
     final w        = MediaQuery.of(context).size.width;
@@ -107,7 +125,8 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
             padding: EdgeInsets.symmetric(horizontal: pad),
             child: Form(
               key: _formKey,
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 const SizedBox(height: 16),
 
                 // ── APP BAR ──
@@ -117,10 +136,12 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                     child: Container(width: 44, height: 44,
                       decoration: BoxDecoration(color: Colors.white,
                         borderRadius: BorderRadius.circular(14),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.07),
+                        boxShadow: [BoxShadow(
+                            color: Colors.black.withOpacity(0.07),
                             blurRadius: 12, offset: const Offset(0, 4))]),
                       child: const Icon(Icons.arrow_back_ios_new_rounded,
-                          color: _dark, size: 18))),
+                          color: _dark, size: 18)),
+                  ),
                   const SizedBox(width: 14),
                   Text('Login Siswa', style: TextStyle(
                       fontSize: isTablet ? 22 : 19,
@@ -139,20 +160,26 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                         begin: Alignment.topLeft, end: Alignment.bottomRight),
                     boxShadow: [BoxShadow(
                         color: const Color(0xFF43A047).withOpacity(0.35),
-                        blurRadius: 24, offset: const Offset(0, 10))]),
+                        blurRadius: 24, offset: const Offset(0, 10))],
+                  ),
                   child: Stack(children: [
                     Positioned(right: -15, top: -15,
                       child: Container(width: 100, height: 100,
                         decoration: BoxDecoration(shape: BoxShape.circle,
                             color: Colors.white.withOpacity(0.08)))),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Column(crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(color: Colors.white.withOpacity(0.20),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                            color: Colors.white.withOpacity(0.20),
                             borderRadius: BorderRadius.circular(20)),
                         child: Text('📅 Soal Harian',
                             style: TextStyle(color: Colors.white,
-                                fontSize: isTablet ? 12 : 11, fontWeight: FontWeight.w700))),
+                                fontSize: isTablet ? 12 : 11,
+                                fontWeight: FontWeight.w700)),
+                      ),
                       const SizedBox(height: 10),
                       Text('Masuk Dulu\nSebelum Mulai! 🔐',
                           style: TextStyle(color: Colors.white,
@@ -160,10 +187,12 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                               fontWeight: FontWeight.w800, height: 1.3)),
                       const SizedBox(height: 6),
                       Text('Gunakan NIS dan password yang diberikan guru.',
-                          style: TextStyle(color: Colors.white.withOpacity(0.80),
+                          style: TextStyle(
+                              color: Colors.white.withOpacity(0.80),
                               fontSize: isTablet ? 13 : 12)),
                     ]),
-                  ])),
+                  ]),
+                ),
 
                 const SizedBox(height: 24),
 
@@ -172,26 +201,32 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                   padding: EdgeInsets.all(isTablet ? 24 : 20),
                   decoration: BoxDecoration(color: Colors.white,
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05),
-                        blurRadius: 16, offset: const Offset(0, 6))]),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    boxShadow: [BoxShadow(
+                        color: Colors.black.withOpacity(0.05),
+                        blurRadius: 16, offset: const Offset(0, 6))],
+                  ),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
                     Text('Login Siswa', style: TextStyle(
                         fontSize: isTablet ? 16 : 15,
                         fontWeight: FontWeight.w800, color: _dark)),
                     const SizedBox(height: 4),
                     Text('Masukkan NIS dan password kamu',
-                        style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                        style: TextStyle(
+                            fontSize: 12, color: Colors.grey.shade500)),
                     const SizedBox(height: 20),
 
                     // NIS
                     TextFormField(
                       controller: _nisCtrl,
                       keyboardType: TextInputType.number,
-                      validator: (v) => v!.isEmpty ? 'NIS wajib diisi' : null,
+                      validator: (v) =>
+                          v!.isEmpty ? 'NIS wajib diisi' : null,
                       style: TextStyle(fontSize: isTablet ? 14 : 13,
                           fontWeight: FontWeight.w600, color: _dark),
                       decoration: _inputDeco('NIS', 'Masukkan NIS kamu',
-                          Icons.badge_rounded, isTablet)),
+                          Icons.badge_rounded, isTablet),
+                    ),
 
                     const SizedBox(height: 14),
 
@@ -200,17 +235,23 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                       controller: _passwordCtrl,
                       obscureText: !_showPassword,
                       keyboardType: TextInputType.number,
-                      validator: (v) => v!.isEmpty ? 'Password wajib diisi' : null,
+                      validator: (v) =>
+                          v!.isEmpty ? 'Password wajib diisi' : null,
                       style: TextStyle(fontSize: isTablet ? 14 : 13,
                           fontWeight: FontWeight.w600, color: _dark),
-                      decoration: _inputDeco('Password', '4 digit terakhir NISN',
+                      decoration: _inputDeco(
+                          'Password', '4 digit terakhir NISN',
                           Icons.lock_rounded, isTablet,
                           suffix: GestureDetector(
-                            onTap: () => setState(() => _showPassword = !_showPassword),
-                            child: Icon(_showPassword
-                                ? Icons.visibility_off_rounded
-                                : Icons.visibility_rounded,
-                                color: Colors.grey.shade400, size: 20)))),
+                            onTap: () => setState(
+                                () => _showPassword = !_showPassword),
+                            child: Icon(
+                                _showPassword
+                                    ? Icons.visibility_off_rounded
+                                    : Icons.visibility_rounded,
+                                color: Colors.grey.shade400, size: 20),
+                          )),
+                    ),
 
                     // Error
                     if (_errorMsg != null) ...[
@@ -222,7 +263,9 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                           color: const Color(0xFFFFEBEE),
                           borderRadius: BorderRadius.circular(10),
                           border: Border.all(
-                              color: const Color(0xFFE53935).withOpacity(0.3))),
+                              color: const Color(0xFFE53935)
+                                  .withOpacity(0.3)),
+                        ),
                         child: Row(children: [
                           const Icon(Icons.error_outline_rounded,
                               color: Color(0xFFE53935), size: 16),
@@ -231,19 +274,38 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                               style: const TextStyle(fontSize: 12,
                                   color: Color(0xFFE53935),
                                   fontWeight: FontWeight.w600))),
-                        ])),
+                        ]),
+                      ),
                     ],
-                  ])),
+
+                    const SizedBox(height: 12),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: GestureDetector(
+                        onTap: _bukaLupaPassword,
+                        child: const Text('Lupa password?',
+                            style: TextStyle(fontSize: 13,
+                                color: Color(0xFF2E7D52),
+                                fontWeight: FontWeight.w700,
+                                decoration: TextDecoration.underline,
+                                decorationColor: Color(0xFF2E7D52))),
+                      ),
+                    ),
+                  ]),
+                ),
 
                 const SizedBox(height: 16),
 
                 // ── INFO ──
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 10),
                   decoration: BoxDecoration(
                     color: const Color(0xFFE8F5E9),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF43A047).withOpacity(0.3))),
+                    border: Border.all(
+                        color: const Color(0xFF43A047).withOpacity(0.3)),
+                  ),
                   child: Row(children: [
                     const Icon(Icons.info_outline_rounded,
                         color: Color(0xFF2E7D52), size: 18),
@@ -251,8 +313,10 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                     Expanded(child: Text(
                       'Password default: 4 digit terakhir NISN.\nContoh NISN 0127542195 → password: 2195',
                       style: TextStyle(fontSize: 12,
-                          color: const Color(0xFF2E7D52), height: 1.5))),
-                  ])),
+                          color: const Color(0xFF2E7D52), height: 1.5),
+                    )),
+                  ]),
+                ),
 
                 const SizedBox(height: 24),
 
@@ -264,23 +328,28 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
                     height: isTablet ? 56 : 52,
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(16),
-                      gradient: const LinearGradient(colors: _gradientGreen),
+                      gradient: const LinearGradient(
+                          colors: _gradientGreen),
                       boxShadow: [BoxShadow(
                           color: const Color(0xFF43A047).withOpacity(0.40),
-                          blurRadius: 16, offset: const Offset(0, 6))]),
+                          blurRadius: 16, offset: const Offset(0, 6))],
+                    ),
                     child: Center(child: _isLoading
                         ? const SizedBox(width: 24, height: 24,
                             child: CircularProgressIndicator(
                                 color: Colors.white, strokeWidth: 2.5))
-                        : Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                            const Icon(Icons.arrow_forward_rounded,
-                                color: Colors.white, size: 22),
-                            const SizedBox(width: 8),
-                            Text('Masuk & Pilih Pertemuan',
-                                style: TextStyle(color: Colors.white,
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: isTablet ? 16 : 15)),
-                          ]))),
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.arrow_forward_rounded,
+                                  color: Colors.white, size: 22),
+                              const SizedBox(width: 8),
+                              Text('Masuk & Pilih Pertemuan',
+                                  style: TextStyle(color: Colors.white,
+                                      fontWeight: FontWeight.w800,
+                                      fontSize: isTablet ? 16 : 15)),
+                            ])),
+                  ),
                 ),
 
                 const SizedBox(height: 32),
@@ -313,7 +382,8 @@ class _SoalHarianFormScreenState extends State<SoalHarianFormScreen>
           borderSide: const BorderSide(color: Color(0xFF43A047), width: 2)),
       errorBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14),
           borderSide: const BorderSide(color: Color(0xFFE53935), width: 1.5)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      contentPadding:
+          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     );
   }
 }
@@ -326,10 +396,13 @@ class _BlobPainter extends CustomPainter {
       (const Color(0xFF5C6BC0), 0.05, 0.55, 0.35),
       (const Color(0xFFFF7043), 0.70, 0.85, 0.30),
     ]) {
-      canvas.drawCircle(Offset(size.width * s.$2, size.height * s.$3),
+      canvas.drawCircle(
+        Offset(size.width * s.$2, size.height * s.$3),
         size.width * s.$4,
-        Paint()..color = s.$1.withOpacity(0.09)
-            ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 60));
+        Paint()
+          ..color = s.$1.withOpacity(0.09)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 60),
+      );
     }
   }
   @override
